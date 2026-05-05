@@ -54,6 +54,10 @@ public class RateLimiterTokenBucket {
         return RateLimiterAcquireResponse.create(update.result);
     }
 
+    PersistentState currentState() {
+        return stateReference.get();
+    }
+
     /**
      * Updates the estimated send rate after a throttling response.
      */
@@ -124,6 +128,9 @@ public class RateLimiterTokenBucket {
         private static final double SMOOTH = 0.8;
         private static final double BETA = 0.7;
         private static final double SCALE_CONSTANT = 0.4;
+        // Throttle responses observed within this many seconds of the previous throttle are treated as a single
+        // congestion event, so a burst of concurrent throttles does not compound the BETA reduction (0.7^N).
+        private static final double THROTTLE_DEBOUNCE_EPSILON_SECONDS = 0.1;
         private double fillRate;
         private double maxCapacity;
         private double currentCapacity;
@@ -164,26 +171,44 @@ public class RateLimiterTokenBucket {
          * are refilled.
          */
         Duration tokenBucketAcquire(RateLimiterClock clock, double amount) {
+            double time = clock.time();
+
             if (!this.enabled) {
                 return Duration.ZERO;
             }
-            refill(clock);
+            refill(time);
             double waitTime = 0.0;
             if (this.currentCapacity < amount) {
                 waitTime = (amount - this.currentCapacity) / this.fillRate;
+                this.currentCapacity = 0;
+            } else {
+                this.currentCapacity -= amount;
             }
-            this.currentCapacity -= amount;
-            return Duration.ofNanos((long) (waitTime * 1_000_000_000.0));
+            try {
+                Thread.sleep(Duration.ofNanos((long) (waitTime * 1_000_000_000.0)).toMillis());
+            } catch (InterruptedException e) {
+                // ignored
+            }
+            return Duration.ZERO;
         }
+
+
 
         /**
          * Updates the sending rate depending on whether the response was successful or
          * we got a throttling response.
          */
         void updateClientSendingRate(RateLimiterClock clock, boolean throttlingResponse) {
-            updateMeasuredRate(clock);
+            double time = clock.time();
+            updateMeasuredRate(time);
             double calculatedRate;
             if (throttlingResponse) {
+                // // Debounce concurrent throttles: once enabled, ignore the rate reduction for throttles seen within
+                // // EPSILON of the last one so a simultaneous burst counts as one congestion event, not N.
+                // if (this.enabled && time - this.lastThrottleTime < THROTTLE_DEBOUNCE_EPSILON_SECONDS) {
+                //     return;
+                // }
+
                 double rateToUse;
                 if (!this.enabled) {
                     rateToUse = this.measuredTxRate;
@@ -193,20 +218,19 @@ public class RateLimiterTokenBucket {
 
                 this.lastMaxRate = rateToUse;
                 calculateTimeWindow();
-                this.lastThrottleTime = clock.time();
+                this.lastThrottleTime = time;
                 calculatedRate = cubicThrottle(rateToUse);
                 this.enabled = true;
             } else {
                 calculateTimeWindow();
-                calculatedRate = cubicSuccess(clock.time());
+                calculatedRate = cubicSuccess(time);
             }
 
             double newRate = Math.min(calculatedRate, 2 * this.measuredTxRate);
-            updateRate(clock, newRate);
+            updateRate(time, newRate);
         }
 
-        void refill(RateLimiterClock clock) {
-            double timestamp = clock.time();
+        void refill(double timestamp) {
             if (this.lastTimestampIsSet) {
                 double fillAmount = (timestamp - this.lastTimestamp) * this.fillRate;
                 this.currentCapacity = Math.min(this.maxCapacity, this.currentCapacity + fillAmount);
@@ -215,16 +239,15 @@ public class RateLimiterTokenBucket {
             this.lastTimestampIsSet = true;
         }
 
-        void updateRate(RateLimiterClock clock, double newRps) {
-            refill(clock);
+        void updateRate(double time, double newRps) {
+            refill(time);
             this.fillRate = Math.max(newRps, MIN_FILL_RATE);
             this.maxCapacity = Math.max(newRps, MIN_CAPACITY);
             this.currentCapacity = Math.min(this.currentCapacity, this.maxCapacity);
             this.newTokenBucketRate = newRps;
         }
 
-        void updateMeasuredRate(RateLimiterClock clock) {
-            double time = clock.time();
+        void updateMeasuredRate(double time) {
             this.requestCount += 1;
             double timeBucket = Math.floor(time * 2) / 2;
             if (timeBucket > this.lastTxRateBucket) {
@@ -302,6 +325,10 @@ public class RateLimiterTokenBucket {
 
         public double fillRate() {
             return fillRate;
+        }
+
+        double currentCapacity() {
+            return currentCapacity;
         }
 
         public double measuredTxRate() {

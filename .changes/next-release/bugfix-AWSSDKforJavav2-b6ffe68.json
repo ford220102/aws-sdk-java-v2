@@ -1,0 +1,6 @@
+{
+    "type": "bugfix",
+    "category": "AWS SDK for Java v2",
+    "contributor": "",
+    "description": "Fixed an issue in adaptive retry mode where, under highly concurrent workloads, simultaneous throttling responses could repeatedly reduce the client-side send rate and cause the SDK to limit its own requests well below the service's actual rate limit. The adaptive rate limiter now treats a burst of concurrent throttling responses as a single congestion event, so the send rate converges to the service's throttle rate as expected."
+}

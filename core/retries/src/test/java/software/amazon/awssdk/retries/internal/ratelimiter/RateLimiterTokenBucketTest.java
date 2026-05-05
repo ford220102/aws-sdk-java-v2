@@ -52,7 +52,6 @@ class RateLimiterTokenBucketTest {
         assertThat(fillRate).isCloseTo(testCase.expectFillRate, within(EPSILON));
     }
 
-
     static Collection<TestCase> parameters() {
         return Arrays.asList(
             new TestCase()
