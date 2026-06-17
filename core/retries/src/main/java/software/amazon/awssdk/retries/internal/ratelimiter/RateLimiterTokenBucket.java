@@ -38,6 +38,7 @@ import software.amazon.awssdk.annotations.SdkInternalApi;
 public class RateLimiterTokenBucket {
     private final AtomicReference<PersistentState> stateReference;
     private final RateLimiterClock clock;
+    private final Object lock = new Object();
 
     RateLimiterTokenBucket(RateLimiterClock clock) {
         this.clock = clock;
@@ -95,17 +96,20 @@ public class RateLimiterTokenBucket {
      * retried until succeeded.
      */
     private <T> StateUpdate<T> updateState(Function<TransientState, T> mutator) {
-        PersistentState current;
-        PersistentState updated;
-        T result;
-        do {
-            current = stateReference.get();
-            TransientState transientState = current.toTransient();
-            result = mutator.apply(transientState);
-            updated = transientState.toPersistent();
-        } while (!stateReference.compareAndSet(current, updated));
+        synchronized (lock) {
+            PersistentState current;
+            PersistentState updated;
+            T result;
+            do {
+                current = stateReference.get();
+                TransientState transientState = current.toTransient();
+                result = mutator.apply(transientState);
+                updated = transientState.toPersistent();
+            } while (!stateReference.compareAndSet(current, updated));
 
-        return new StateUpdate<>(updated, result);
+
+            return new StateUpdate<>(updated, result);
+        }
     }
 
     PersistentState currentState() {
@@ -175,9 +179,17 @@ public class RateLimiterTokenBucket {
             double waitTime = 0.0;
             if (this.currentCapacity < amount) {
                 waitTime = (amount - this.currentCapacity) / this.fillRate;
+                this.currentCapacity = 0.0;
+                try {
+                    Duration d = Duration.ofNanos((long) (waitTime * 1_000_000_000.0));
+                    Thread.sleep(d.toMillis());
+                } catch (InterruptedException ie) {
+                    // ignored
+                }
+            } else {
+                this.currentCapacity -= amount;
             }
-            this.currentCapacity -= amount;
-            return Duration.ofNanos((long) (waitTime * 1_000_000_000.0));
+            return Duration.ZERO;
         }
 
         /**
