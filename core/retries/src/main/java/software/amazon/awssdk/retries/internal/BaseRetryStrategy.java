@@ -86,7 +86,7 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
      * @see RetryStrategy#acquireInitialToken(AcquireInitialTokenRequest)
      */
     @Override
-    public final AcquireInitialTokenResponse acquireInitialToken(AcquireInitialTokenRequest request) {
+    public AcquireInitialTokenResponse acquireInitialToken(AcquireInitialTokenRequest request) {
         logAcquireInitialToken(request);
         DefaultRetryToken token = DefaultRetryToken.builder().scope(request.scope()).build();
         return AcquireInitialTokenResponse.create(token, computeInitialBackoff(request));

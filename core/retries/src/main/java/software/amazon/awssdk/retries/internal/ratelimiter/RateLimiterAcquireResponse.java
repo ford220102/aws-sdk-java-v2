@@ -20,9 +20,11 @@ import software.amazon.awssdk.annotations.SdkInternalApi;
 
 @SdkInternalApi
 public final class RateLimiterAcquireResponse {
+    private final boolean successful;
     private final Duration delay;
 
-    private RateLimiterAcquireResponse(Duration delay) {
+    private RateLimiterAcquireResponse(boolean successful, Duration delay) {
+        this.successful = successful;
         this.delay = delay;
     }
 
@@ -30,8 +32,17 @@ public final class RateLimiterAcquireResponse {
         return delay;
     }
 
-    public static RateLimiterAcquireResponse create(Duration waitTime) {
-        return new RateLimiterAcquireResponse(waitTime);
+    public boolean successful() {
+        return successful;
     }
+
+    public static RateLimiterAcquireResponse create(Duration waitTime) {
+        return create(true, waitTime);
+    }
+
+    public static RateLimiterAcquireResponse create(boolean successful, Duration waitTime) {
+        return new RateLimiterAcquireResponse(successful, waitTime);
+    }
+
 
 }

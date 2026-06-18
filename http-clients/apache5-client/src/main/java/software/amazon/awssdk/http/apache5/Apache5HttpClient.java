@@ -99,6 +99,7 @@ import software.amazon.awssdk.http.apache5.internal.conn.SdkTlsSocketFactory;
 import software.amazon.awssdk.http.apache5.internal.impl.Apache5HttpRequestFactory;
 import software.amazon.awssdk.http.apache5.internal.impl.Apache5SdkHttpClient;
 import software.amazon.awssdk.http.apache5.internal.impl.ConnectionManagerAwareHttpClient;
+import software.amazon.awssdk.http.apache5.internal.impl.SdkHttpRequestExecutor;
 import software.amazon.awssdk.http.apache5.internal.utils.Apache5Utils;
 import software.amazon.awssdk.metrics.MetricCollector;
 import software.amazon.awssdk.metrics.NoOpMetricCollector;
@@ -184,7 +185,7 @@ public final class Apache5HttpClient implements SdkHttpClient {
             builder.setDefaultAuthSchemeRegistry(authSchemeRegistry);
         }
 
-        builder.setRequestExecutor(new HttpRequestExecutor())
+        builder.setRequestExecutor(new SdkHttpRequestExecutor())
                // SDK handles decompression
                .disableContentCompression()
                .setKeepAliveStrategy(buildKeepAliveStrategy(standardOptions))

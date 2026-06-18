@@ -30,7 +30,8 @@ public final class AcquireInitialTokenResponseImpl implements AcquireInitialToke
     private final Duration delay;
 
     private AcquireInitialTokenResponseImpl(RetryToken token, Duration delay) {
-        this.token = Validate.paramNotNull(token, "token");
+        // this.token = Validate.paramNotNull(token, "token");
+        this.token = token;
         this.delay = Validate.paramNotNull(delay, "delay");
     }
 

@@ -20,9 +20,11 @@ import java.util.function.Predicate;
 import software.amazon.awssdk.annotations.SdkInternalApi;
 import software.amazon.awssdk.retries.AdaptiveRetryStrategy;
 import software.amazon.awssdk.retries.api.AcquireInitialTokenRequest;
+import software.amazon.awssdk.retries.api.AcquireInitialTokenResponse;
 import software.amazon.awssdk.retries.api.BackoffStrategy;
 import software.amazon.awssdk.retries.api.RefreshRetryTokenRequest;
 import software.amazon.awssdk.retries.internal.circuitbreaker.TokenBucketStore;
+import software.amazon.awssdk.retries.internal.ratelimiter.RateLimiterAcquireResponse;
 import software.amazon.awssdk.retries.internal.ratelimiter.RateLimiterTokenBucket;
 import software.amazon.awssdk.retries.internal.ratelimiter.RateLimiterTokenBucketStore;
 import software.amazon.awssdk.utils.Logger;
@@ -42,6 +44,19 @@ public final class DefaultAdaptiveRetryStrategy
     }
 
     @Override
+    public AcquireInitialTokenResponse acquireInitialToken(AcquireInitialTokenRequest request) {
+        // return super.acquireInitialToken(request);
+        RateLimiterTokenBucket bucket = rateLimiterTokenBucketStore.tokenBucketForScope(request.scope());
+        RateLimiterAcquireResponse response = bucket.tryAcquire();
+        Duration delay = response.delay();
+        DefaultRetryToken token = null;
+        if (!delay.isZero()) {
+             token = DefaultRetryToken.builder().scope(request.scope()).build();
+        }
+        return AcquireInitialTokenResponse.create(token, delay);
+    }
+
+    @Override
     protected Duration computeInitialBackoff(AcquireInitialTokenRequest request) {
         RateLimiterTokenBucket bucket = rateLimiterTokenBucketStore.tokenBucketForScope(request.scope());
         return bucket.tryAcquire().delay();
@@ -53,6 +68,18 @@ public final class DefaultAdaptiveRetryStrategy
         RateLimiterTokenBucket bucket = rateLimiterTokenBucketStore.tokenBucketForScope(token.scope());
         return backoff.plus(bucket.tryAcquire().delay());
     }
+
+    // private void spinBucketAcquire(DefaultRetryToken token) {
+    //     while (true) {
+    //         RateLimiterTokenBucket bucket = rateLimiterTokenBucketStore.tokenBucketForScope(token.scope());
+    //         RateLimiterAcquireResponse rateLimiterAcquireResponse = bucket.tryAcquire();
+    //
+    //         if (rateLimiterAcquireResponse.successful()) {
+    //             break;
+    //         }
+    //
+    //     }
+    // }
 
     @Override
     protected void updateStateForRetry(RefreshRetryTokenRequest request) {

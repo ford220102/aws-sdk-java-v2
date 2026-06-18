@@ -51,8 +51,9 @@ public class RateLimiterTokenBucket {
      * callers need to wait until enough tokens are refilled.
      */
     public RateLimiterAcquireResponse tryAcquire() {
-        StateUpdate<Duration> update = updateState(ts -> ts.tokenBucketAcquire(clock, 1.0));
-        return RateLimiterAcquireResponse.create(update.result);
+        StateUpdate<AcquireResult> update = updateState(ts -> ts.tokenBucketAcquire(clock, 1.0));
+        AcquireResult result = update.result;
+        return RateLimiterAcquireResponse.create(result.successful, result.delay);
     }
 
     /**
@@ -126,6 +127,16 @@ public class RateLimiterTokenBucket {
         }
     }
 
+    static class AcquireResult {
+        private final boolean successful;
+        private final Duration delay;
+
+        public AcquireResult(boolean successful, Duration delay) {
+            this.successful = successful;
+            this.delay = delay;
+        }
+    }
+
     static final class TransientState {
         private static final double MIN_FILL_RATE = 0.5;
         private static final double MIN_CAPACITY = 1.0;
@@ -171,25 +182,20 @@ public class RateLimiterTokenBucket {
          * a {@link Duration#ZERO} value, otherwise it will return the amount of time the callers need to wait until enough tokens
          * are refilled.
          */
-        Duration tokenBucketAcquire(RateLimiterClock clock, double amount) {
+        AcquireResult tokenBucketAcquire(RateLimiterClock clock, double amount) {
             if (!this.enabled) {
-                return Duration.ZERO;
+                return new AcquireResult(true, Duration.ZERO);
             }
             refill(clock);
             double waitTime = 0.0;
             if (this.currentCapacity < amount) {
                 waitTime = (amount - this.currentCapacity) / this.fillRate;
-                this.currentCapacity = 0.0;
-                try {
-                    Duration d = Duration.ofNanos((long) (waitTime * 1_000_000_000.0));
-                    Thread.sleep(d.toMillis());
-                } catch (InterruptedException ie) {
-                    // ignored
-                }
-            } else {
-                this.currentCapacity -= amount;
+                Duration d = Duration.ofNanos((long) (waitTime * 1_000_000_000.0));
+                return new AcquireResult(false, d);
             }
-            return Duration.ZERO;
+
+            this.currentCapacity -= amount;
+            return new AcquireResult(true, Duration.ZERO);
         }
 
         /**

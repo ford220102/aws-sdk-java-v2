@@ -54,8 +54,13 @@ public final class RetryableStage<OutputT> implements RequestToResponsePipeline<
     @Override
     public Response<OutputT> execute(SdkHttpFullRequest request, RequestExecutionContext context) throws Exception {
         RetryableStageHelper retryableStageHelper = new RetryableStageHelper(request, context, dependencies);
-        Duration initialDelay = retryableStageHelper.acquireInitialToken();
-        TimeUnit.MILLISECONDS.sleep(initialDelay.toMillis());
+        boolean keepGoing = true;
+        while (keepGoing) {
+            Duration initialDelay = retryableStageHelper.acquireInitialToken();
+            TimeUnit.MILLISECONDS.sleep(Math.abs(initialDelay.toMillis()));
+            keepGoing = initialDelay.isNegative();
+        }
+
         while (true) {
             try {
                 retryableStageHelper.startingAttempt();

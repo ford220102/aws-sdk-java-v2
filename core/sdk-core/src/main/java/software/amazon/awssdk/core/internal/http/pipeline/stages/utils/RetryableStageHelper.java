@@ -111,6 +111,10 @@ public final class RetryableStageHelper {
         AcquireInitialTokenResponse acquireResponse = retryStrategy().acquireInitialToken(acquireRequest);
         RetryToken retryToken = acquireResponse.token();
         Duration delay = acquireResponse.delay();
+
+        if (retryToken == null) {
+            return delay.negated();
+        }
         context.executionAttributes().putAttribute(RETRY_TOKEN, retryToken);
         context.executionAttributes().putAttribute(LAST_BACKOFF_DELAY_DURATION, delay);
         return delay;
@@ -159,6 +163,7 @@ public final class RetryableStageHelper {
             return Either.right(Duration.ZERO);
         }
         Duration acquireSuccessDelay = refreshResponse.delay();
+
         context.executionAttributes().putAttribute(RETRY_TOKEN, refreshResponse.token());
         context.executionAttributes().putAttribute(LAST_BACKOFF_DELAY_DURATION, acquireSuccessDelay);
         return Either.left(acquireSuccessDelay);
