@@ -64,6 +64,7 @@ import software.amazon.awssdk.regions.ServiceMetadataAdvancedOption;
 import software.amazon.awssdk.services.s3.endpoints.S3ClientContextParams;
 import software.amazon.awssdk.services.s3.endpoints.S3EndpointParams;
 import software.amazon.awssdk.services.s3.endpoints.S3EndpointProvider;
+import software.amazon.awssdk.utils.CompletableFutureUtils;
 import software.amazon.awssdk.services.s3.endpoints.internal.S3EndpointResolverUtils;
 import software.amazon.awssdk.services.s3.internal.endpoints.UseGlobalEndpointResolver;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -420,19 +421,34 @@ public final class S3Utilities {
      * If endpoint is not present, construct a default endpoint using the region information.
      */
     private ClientEndpointProvider clientEndpointProvider(URI overrideEndpoint, Region region) {
-        return AwsClientEndpointProvider.builder()
-                                        .clientEndpointOverride(overrideEndpoint)
+        if (overrideEndpoint != null) {
+            return AwsClientEndpointProvider.builder()
+                                            .clientEndpointOverride(overrideEndpoint)
+                                            .serviceEndpointOverrideEnvironmentVariable("AWS_ENDPOINT_URL_S3")
+                                            .serviceEndpointOverrideSystemProperty("aws.endpointUrlS3")
+                                            .serviceProfileProperty("s3")
+                                            .profileFile(profileFile)
+                                            .profileName(profileName)
+                                            .build();
+        }
+        Optional<ClientEndpointProvider> fromOverrides = AwsClientEndpointProvider.builder()
                                         .serviceEndpointOverrideEnvironmentVariable("AWS_ENDPOINT_URL_S3")
                                         .serviceEndpointOverrideSystemProperty("aws.endpointUrlS3")
                                         .serviceProfileProperty("s3")
-                                        .serviceEndpointPrefix(SERVICE_NAME)
-                                        .defaultProtocol("https")
-                                        .region(region)
                                         .profileFile(profileFile)
                                         .profileName(profileName)
-                                        .dualstackEnabled(s3Configuration.dualstackEnabled())
-                                        .fipsEnabled(fipsEnabled)
-                                        .build();
+                                        .buildOptional();
+        if (fromOverrides.isPresent()) {
+            return fromOverrides.get();
+        }
+        S3EndpointProvider provider = S3EndpointProvider.defaultProvider();
+        S3EndpointParams params = S3EndpointParams.builder()
+                                                  .region(region)
+                                                  .useFips(fipsEnabled)
+                                                  .useDualStack(s3Configuration.dualstackEnabled())
+                                                  .build();
+        Endpoint endpoint = CompletableFutureUtils.joinLikeSync(provider.resolveEndpoint(params));
+        return ClientEndpointProvider.create(endpoint.url(), false);
     }
 
     private URI getEndpointOverride(GetUrlRequest request) {
