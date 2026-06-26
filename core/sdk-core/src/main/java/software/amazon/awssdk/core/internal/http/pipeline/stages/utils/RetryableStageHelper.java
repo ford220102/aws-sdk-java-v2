@@ -142,6 +142,7 @@ public final class RetryableStageHelper {
      * code should not retry.
      */
     public Either<Duration, Duration> tryRefreshToken(Duration suggestedDelay) {
+        System.out.println("try refresh");
         RetryToken retryToken = context.executionAttributes().getAttribute(RETRY_TOKEN);
         RefreshRetryTokenResponse refreshResponse;
         try {
@@ -151,7 +152,19 @@ public final class RetryableStageHelper {
                                                                               .isLongPolling(isLongPollingOperation)
                                                                               .suggestedDelay(suggestedDelay)
                                                                               .build();
-            refreshResponse = retryStrategy().refreshRetryToken(refreshRequest);
+            while (true) {
+                refreshResponse = retryStrategy().refreshRetryToken(refreshRequest);
+                if (refreshResponse.token() != null) {
+                    break;
+                }
+                try {
+                    System.out.println("sleeping refresh");
+
+                    Thread.sleep(refreshResponse.delay().toMillis());
+                } catch (InterruptedException e) {
+                    // ignored
+                }
+            }
         } catch (TokenAcquisitionFailedException e) {
             context.executionAttributes().putAttribute(RETRY_TOKEN, e.token());
             Optional<Duration> acquireFailureDelay = e.delay();
@@ -166,6 +179,7 @@ public final class RetryableStageHelper {
 
         context.executionAttributes().putAttribute(RETRY_TOKEN, refreshResponse.token());
         context.executionAttributes().putAttribute(LAST_BACKOFF_DELAY_DURATION, acquireSuccessDelay);
+        System.out.println("return");
         return Either.left(acquireSuccessDelay);
     }
 

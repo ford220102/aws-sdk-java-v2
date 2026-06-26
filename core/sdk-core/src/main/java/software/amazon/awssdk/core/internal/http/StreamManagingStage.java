@@ -51,6 +51,9 @@ public final class StreamManagingStage<OutputT> implements RequestPipeline<SdkHt
         try {
             InterruptMonitor.checkInterrupted();
             return wrapped.execute(request, context);
+        } catch (Exception t) {
+            // t.printStackTrace();
+            throw t;
         } finally {
             if (toBeClosed != null) {
                 toBeClosed.closeCurrentStream();

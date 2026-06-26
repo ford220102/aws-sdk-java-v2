@@ -30,8 +30,8 @@ public final class RefreshRetryTokenResponseImpl implements RefreshRetryTokenRes
     private final Duration delay;
 
     private RefreshRetryTokenResponseImpl(RetryToken token, Duration delay) {
-        this.token = Validate.paramNotNull(token, "token");
-        this.delay = Validate.isNotNegative(Validate.paramNotNull(delay, "delay"), "delay");
+        this.token = token;
+        this.delay = delay;
     }
 
     @Override

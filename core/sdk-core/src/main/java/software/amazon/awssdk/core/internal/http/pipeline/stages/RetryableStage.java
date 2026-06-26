@@ -58,6 +58,7 @@ public final class RetryableStage<OutputT> implements RequestToResponsePipeline<
         while (keepGoing) {
             Duration initialDelay = retryableStageHelper.acquireInitialToken();
             TimeUnit.MILLISECONDS.sleep(Math.abs(initialDelay.toMillis()));
+            // System.out.println("sleeping initial token");
             keepGoing = initialDelay.isNegative();
         }
 

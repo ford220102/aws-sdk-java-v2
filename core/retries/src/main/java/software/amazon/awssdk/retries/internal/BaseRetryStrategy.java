@@ -119,6 +119,10 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
         DefaultRetryToken refreshedToken = refreshToken(request, acquireResponse);
         Duration backoff = computeBackoff(request, refreshedToken);
 
+        if (backoff.isNegative()) {
+            RefreshRetryTokenResponseImpl.create(null, backoff.negated());
+        }
+
         logRefreshTokenSuccess(refreshedToken, acquireResponse, backoff);
         return RefreshRetryTokenResponseImpl.create(refreshedToken, backoff);
     }

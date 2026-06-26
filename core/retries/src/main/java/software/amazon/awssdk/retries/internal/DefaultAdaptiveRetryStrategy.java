@@ -45,12 +45,11 @@ public final class DefaultAdaptiveRetryStrategy
 
     @Override
     public AcquireInitialTokenResponse acquireInitialToken(AcquireInitialTokenRequest request) {
-        // return super.acquireInitialToken(request);
         RateLimiterTokenBucket bucket = rateLimiterTokenBucketStore.tokenBucketForScope(request.scope());
         RateLimiterAcquireResponse response = bucket.tryAcquire();
         Duration delay = response.delay();
         DefaultRetryToken token = null;
-        if (!delay.isZero()) {
+        if (delay.isZero()) {
              token = DefaultRetryToken.builder().scope(request.scope()).build();
         }
         return AcquireInitialTokenResponse.create(token, delay);
@@ -62,25 +61,21 @@ public final class DefaultAdaptiveRetryStrategy
         return bucket.tryAcquire().delay();
     }
 
+
+
     @Override
     protected Duration computeBackoff(RefreshRetryTokenRequest request, DefaultRetryToken token) {
-        Duration backoff = super.computeBackoff(request, token);
         RateLimiterTokenBucket bucket = rateLimiterTokenBucketStore.tokenBucketForScope(token.scope());
-        return backoff.plus(bucket.tryAcquire().delay());
+        RateLimiterAcquireResponse response = bucket.tryAcquire();
+
+        Duration delay = response.delay();
+
+        if (!delay.isZero()) {
+            return delay.negated();
+        }
+
+        return super.computeBackoff(request, token);
     }
-
-    // private void spinBucketAcquire(DefaultRetryToken token) {
-    //     while (true) {
-    //         RateLimiterTokenBucket bucket = rateLimiterTokenBucketStore.tokenBucketForScope(token.scope());
-    //         RateLimiterAcquireResponse rateLimiterAcquireResponse = bucket.tryAcquire();
-    //
-    //         if (rateLimiterAcquireResponse.successful()) {
-    //             break;
-    //         }
-    //
-    //     }
-    // }
-
     @Override
     protected void updateStateForRetry(RefreshRetryTokenRequest request) {
         if (treatAsThrottling.test(request.failure())) {
