@@ -15,6 +15,7 @@
 
 package software.amazon.awssdk.retries.api;
 
+import java.time.Duration;
 import java.util.function.Predicate;
 import software.amazon.awssdk.annotations.SdkPublicApi;
 import software.amazon.awssdk.annotations.ThreadSafe;
@@ -52,7 +53,16 @@ public interface RetryStrategy {
      * @throws NullPointerException            if a required parameter is not specified
      * @throws TokenAcquisitionFailedException if a token cannot be acquired
      */
+    @Deprecated
     AcquireInitialTokenResponse acquireInitialToken(AcquireInitialTokenRequest request);
+
+    /**
+     * By default, behaves identically to {@link #acquireInitialToken(AcquireInitialTokenRequest)}.
+     */
+    default TryAcquireInitialTokenResult tryAcquireInitialToken(AcquireInitialTokenRequest request) {
+        AcquireInitialTokenResponse response = acquireInitialToken(request);
+        return new TryAcquireInitialTokenResult(response, Duration.ZERO);
+    }
 
     /**
      * Invoked before each subsequent (non-first) request attempt.
@@ -69,6 +79,11 @@ public interface RetryStrategy {
      * @throws TokenAcquisitionFailedException if a token cannot be acquired
      */
     RefreshRetryTokenResponse refreshRetryToken(RefreshRetryTokenRequest request);
+
+    default TryRefreshRetryTokenResult tryRefreshRetryToken(RefreshRetryTokenRequest request) {
+        RefreshRetryTokenResponse response = refreshRetryToken(request);
+        return new TryRefreshRetryTokenResult(response, response.token(), Duration.ZERO);
+    }
 
     /**
      * Invoked after an attempt succeeds.

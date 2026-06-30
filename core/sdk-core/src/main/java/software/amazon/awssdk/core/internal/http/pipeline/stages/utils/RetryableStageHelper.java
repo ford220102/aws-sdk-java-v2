@@ -49,6 +49,8 @@ import software.amazon.awssdk.retries.api.RefreshRetryTokenResponse;
 import software.amazon.awssdk.retries.api.RetryStrategy;
 import software.amazon.awssdk.retries.api.RetryToken;
 import software.amazon.awssdk.retries.api.TokenAcquisitionFailedException;
+import software.amazon.awssdk.retries.api.TryAcquireInitialTokenResult;
+import software.amazon.awssdk.retries.api.TryRefreshRetryTokenResult;
 import software.amazon.awssdk.utils.Either;
 
 /**
@@ -108,7 +110,21 @@ public final class RetryableStageHelper {
     public Duration acquireInitialToken() {
         String scope = "GLOBAL";
         AcquireInitialTokenRequest acquireRequest = AcquireInitialTokenRequest.create(scope);
-        AcquireInitialTokenResponse acquireResponse = retryStrategy().acquireInitialToken(acquireRequest);
+        AcquireInitialTokenResponse acquireResponse = null;
+
+        do {
+            TryAcquireInitialTokenResult result = retryStrategy().tryAcquireInitialToken(acquireRequest);
+            if (!result.response().isPresent()) {
+                try {
+                    Thread.sleep(result.nextAttemptDelay().get().toMillis());
+                } catch (InterruptedException e) {
+                    // ignore
+                }
+            } else {
+                acquireResponse = result.response().get();
+            }
+        } while (acquireResponse == null);
+
         RetryToken retryToken = acquireResponse.token();
         Duration delay = acquireResponse.delay();
         context.executionAttributes().putAttribute(RETRY_TOKEN, retryToken);
@@ -141,13 +157,28 @@ public final class RetryableStageHelper {
         RetryToken retryToken = context.executionAttributes().getAttribute(RETRY_TOKEN);
         RefreshRetryTokenResponse refreshResponse;
         try {
-            RefreshRetryTokenRequest refreshRequest = RefreshRetryTokenRequest.builder()
-                                                                              .failure(this.lastException)
-                                                                              .token(retryToken)
-                                                                              .isLongPolling(isLongPollingOperation)
-                                                                              .suggestedDelay(suggestedDelay)
-                                                                              .build();
-            refreshResponse = retryStrategy().refreshRetryToken(refreshRequest);
+            while (true) {
+                RefreshRetryTokenRequest refreshRequest = RefreshRetryTokenRequest.builder()
+                                                                                  .failure(this.lastException)
+                                                                                  .token(retryToken)
+                                                                                  .isLongPolling(isLongPollingOperation)
+                                                                                  .suggestedDelay(suggestedDelay)
+                                                                                  .build();
+
+                TryRefreshRetryTokenResult tryRefreshResult = retryStrategy().tryRefreshRetryToken(refreshRequest);
+                Optional<RefreshRetryTokenResponse> refreshResponseOptional = tryRefreshResult.response();
+                if (refreshResponseOptional.isPresent()) {
+                    refreshResponse = refreshResponseOptional.get();
+                    break;
+                }
+
+                retryToken = tryRefreshResult.token();
+                try {
+                    Thread.sleep(tryRefreshResult.nextAttemptDelay().toMillis());
+                } catch (InterruptedException e) {
+                    // ignored;
+                }
+            }
         } catch (TokenAcquisitionFailedException e) {
             context.executionAttributes().putAttribute(RETRY_TOKEN, e.token());
             Optional<Duration> acquireFailureDelay = e.delay();

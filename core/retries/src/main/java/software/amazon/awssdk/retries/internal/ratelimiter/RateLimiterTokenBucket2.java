@@ -17,8 +17,6 @@ package software.amazon.awssdk.retries.internal.ratelimiter;
 
 import java.time.Duration;
 import java.util.Optional;
-import java.util.concurrent.Callable;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -39,11 +37,14 @@ import software.amazon.awssdk.annotations.SdkInternalApi;
  */
 @SdkInternalApi
 public class RateLimiterTokenBucket2 {
+    private static final long NS_PER_MS = 1_000_000L;
     private final AtomicReference<PersistentState> stateReference;
     private final RateLimiterClock clock;
     private final Object lock = new Object();
-    private final AtomicBoolean spinLock = new AtomicBoolean(false);
-    private volatile long nextCheckTime = 0L;
+
+    // The absolute earliest time a caller should attempt to try acquiring capacity. If a caller is too early, they will need to
+    // wait nextCheckNanoTime - currentNanoTime.
+    private volatile long nextAcquireNanoTime = 0L;
 
     RateLimiterTokenBucket2(RateLimiterClock clock) {
         this.clock = clock;
@@ -51,49 +52,56 @@ public class RateLimiterTokenBucket2 {
     }
 
     /**
-     * Acquire tokens from the bucket. If the bucket contains enough capacity to satisfy the request, this method will return in
-     * {@link RateLimiterAcquireResponse#delay()} a {@link Duration#ZERO} value, otherwise it will return the amount of time the
-     * callers need to wait until enough tokens are refilled.
+     * Attempt to acquire a token from this bucket.
+     * <p>
+     * If the attempt was successful, the {@link AcquireResult#delayUntilNext() delay} on the result will be 0, and
+     * {@link AcquireResult#response()} will be present. if the attempt was <b>unsuccessful</b>, {@link AcquireResult#response()}
+     * will be empty, and the {@link AcquireResult#delayUntilNext() delay} will be non-zero. Callers SHOULD wait a minimum time of
+     * {@link AcquireResult#delayUntilNext()} until attempting to call this method again.
      */
     public AcquireResult tryAcquire() {
         synchronized (lock) {
-            long currentTime = System.nanoTime();
-            if (nextCheckTime > currentTime) {
-                Duration nextAttempt = Duration.ofNanos(nextCheckTime - currentTime);
+            long currentNanoTime = System.nanoTime();
+            if (nextAcquireNanoTime > currentNanoTime) {
+                // ensure at least 1ms
+                Duration nextAttempt = Duration.ofNanos(Math.max(NS_PER_MS, nextAcquireNanoTime - currentNanoTime));
                 System.out.printf("acquire too early: %dms%n", nextAttempt.toMillis());
-                return new AcquireResult(null, nextAttempt, this::tryAcquire);
+                return new AcquireResult(null, nextAttempt);
             }
+
             PersistentState persistentState = stateReference.get();
             TransientState ts = persistentState.toTransient();
             Duration duration = ts.tokenBucketAcquire(clock, 1.0);
-            stateReference.set(ts.toPersistent());
-            nextCheckTime = currentTime + duration.toNanos();
 
-            return new AcquireResult(RateLimiterAcquireResponse.create(duration), Duration.ZERO, null);
+            stateReference.set(ts.toPersistent());
+            nextAcquireNanoTime = currentNanoTime + duration.toNanos();
+
+            return new AcquireResult(RateLimiterAcquireResponse.create(duration), Duration.ZERO);
         }
     }
 
     public static class AcquireResult {
-        private RateLimiterAcquireResponse response;
-        private Duration delayUntilNext = Duration.ZERO;
-        private Callable<AcquireResult> next;
+        private final RateLimiterAcquireResponse response;
+        private final Duration delayUntilNext;
 
-        public AcquireResult(RateLimiterAcquireResponse response, Duration delayUntilNext, Callable<AcquireResult> next) {
+        public AcquireResult(RateLimiterAcquireResponse response, Duration delayUntilNext) {
             this.response = response;
             this.delayUntilNext = delayUntilNext;
-            this.next = next;
         }
 
+        /**
+         * The response from the rate limiter; this is present only if the acquire operation was successful.
+         */
         public Optional<RateLimiterAcquireResponse> response() {
             return Optional.ofNullable(response);
         }
 
+        /**
+         * If {@link #response()} returns empty, indicates the minimum amount of time the caller should wait until performing
+         * another attempt to acquire a token.
+         */
         public Duration delayUntilNext() {
             return delayUntilNext;
-        }
-
-        public Optional<Callable<AcquireResult>> next() {
-            return Optional.ofNullable(next);
         }
     }
 

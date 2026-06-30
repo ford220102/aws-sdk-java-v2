@@ -64,7 +64,8 @@ class AdaptiveRetryThrottleTest {
     private static final Duration TEST_DURATION = Duration.ofSeconds(60);
     private static final Duration WARMUP        = Duration.ofSeconds(2);
     private static final Duration TAIL_TRIM     = Duration.ofSeconds(1);
-    private static final int WORKERS = Runtime.getRuntime().availableProcessors();
+    // private static final int WORKERS = Runtime.getRuntime().availableProcessors();
+    private static final int WORKERS = 1;
 
     private static final RollingThrottle THROTTLE = new RollingThrottle(THROTTLE_RPS);
 

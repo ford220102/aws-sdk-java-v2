@@ -33,6 +33,7 @@ import software.amazon.awssdk.retries.api.RefreshRetryTokenResponse;
 import software.amazon.awssdk.retries.api.RetryStrategy;
 import software.amazon.awssdk.retries.api.RetryToken;
 import software.amazon.awssdk.retries.api.TokenAcquisitionFailedException;
+import software.amazon.awssdk.retries.api.TryAcquireInitialTokenResult;
 import software.amazon.awssdk.retries.api.internal.RefreshRetryTokenResponseImpl;
 import software.amazon.awssdk.retries.internal.circuitbreaker.AcquireResponse;
 import software.amazon.awssdk.retries.internal.circuitbreaker.ReleaseResponse;
@@ -230,7 +231,7 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
         return retryPredicates;
     }
 
-    private DefaultRetryToken refreshToken(RefreshRetryTokenRequest request, AcquireResponse acquireResponse) {
+    protected DefaultRetryToken refreshToken(RefreshRetryTokenRequest request, AcquireResponse acquireResponse) {
         DefaultRetryToken token = asDefaultRetryToken(request.token());
         return token.toBuilder()
                     .increaseAttempt()
@@ -241,7 +242,7 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
                     .build();
     }
 
-    private AcquireResponse requestAcquireCapacity(RefreshRetryTokenRequest request, DefaultRetryToken token) {
+    protected AcquireResponse requestAcquireCapacity(RefreshRetryTokenRequest request, DefaultRetryToken token) {
         TokenBucket tokenBucket = tokenBucketStore.tokenBucketForScope(token.scope());
         return tokenBucket.tryAcquire(exceptionCost(request));
     }
@@ -261,7 +262,7 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
                     .build();
     }
 
-    private void throwOnMaxAttemptsReached(RefreshRetryTokenRequest request) {
+    protected void throwOnMaxAttemptsReached(RefreshRetryTokenRequest request) {
         DefaultRetryToken token = asDefaultRetryToken(request.token());
         if (maxAttemptsReached(token)) {
             Throwable failure = request.failure();
@@ -278,7 +279,7 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
         }
     }
 
-    private void throwOnNonRetryableException(RefreshRetryTokenRequest request) {
+    protected void throwOnNonRetryableException(RefreshRetryTokenRequest request) {
         DefaultRetryToken token = asDefaultRetryToken(request.token());
         Throwable failure = request.failure();
         if (isNonRetryableException(request)) {
@@ -297,7 +298,7 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
         log.debug(() -> String.format("Request attempt %d encountered retryable failure.", attempt), failure);
     }
 
-    private void throwOnAcquisitionFailure(RefreshRetryTokenRequest request, AcquireResponse acquireResponse) {
+    protected void throwOnAcquisitionFailure(RefreshRetryTokenRequest request, AcquireResponse acquireResponse) {
         DefaultRetryToken token = asDefaultRetryToken(request.token());
         if (acquireResponse.acquisitionFailed()) {
             Throwable failure = request.failure();
@@ -343,7 +344,7 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
                                       tokenBucket.currentCapacity(), tokenBucket.maxCapacity()));
     }
 
-    private void logRefreshTokenSuccess(DefaultRetryToken token, AcquireResponse acquireResponse, Duration delay) {
+    protected void logRefreshTokenSuccess(DefaultRetryToken token, AcquireResponse acquireResponse, Duration delay) {
         log.debug(() -> String.format("Request attempt %d token acquired "
                                       + "(backoff: %dms, cost: %d, capacity: %d/%d)",
                                       token.attempt(), delay.toMillis(),
