@@ -30,17 +30,17 @@ public final class RateLimiterTokenBucketStore
     implements ToCopyableBuilder<RateLimiterTokenBucketStore.Builder, RateLimiterTokenBucketStore> {
     private static final int MAX_ENTRIES = 128;
     private static final RateLimiterClock DEFAULT_CLOCK = new SystemClock();
-    private final LruCache<String, RateLimiterTokenBucket> scopeToTokenBucket;
+    private final LruCache<String, RateLimiterTokenBucket2> scopeToTokenBucket;
     private final RateLimiterClock clock;
 
     private RateLimiterTokenBucketStore(Builder builder) {
         this.clock = Validate.paramNotNull(builder.clock, "clock");
-        this.scopeToTokenBucket = LruCache.<String, RateLimiterTokenBucket>builder(x -> new RateLimiterTokenBucket(clock))
+        this.scopeToTokenBucket = LruCache.<String, RateLimiterTokenBucket2>builder(x -> new RateLimiterTokenBucket2(clock))
                                           .maxSize(MAX_ENTRIES)
                                           .build();
     }
 
-    public RateLimiterTokenBucket tokenBucketForScope(String scope) {
+    public RateLimiterTokenBucket2 tokenBucketForScope(String scope) {
         return scopeToTokenBucket.get(scope);
     }
 

@@ -16,6 +16,8 @@
 package software.amazon.awssdk.retries.internal.ratelimiter;
 
 import java.time.Duration;
+import java.util.Optional;
+import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -23,7 +25,7 @@ import java.util.function.Function;
 import software.amazon.awssdk.annotations.SdkInternalApi;
 
 /**
- * The {@link RateLimiterTokenBucket} keeps track of past throttling responses and adapts to slow down the send rate to adapt to
+ * The {@link RateLimiterTokenBucket2} keeps track of past throttling responses and adapts to slow down the send rate to adapt to
  * the service. It does this by suggesting a delay amount as result of a {@link #tryAcquire()} call. Callers must update its
  * internal state by calling {@link #updateRateAfterThrottling()} when getting a throttling response or
  * {@link #updateRateAfterSuccess()} when getting successful response.
@@ -36,14 +38,14 @@ import software.amazon.awssdk.annotations.SdkInternalApi;
  * <a href="https://en.wikipedia.org/wiki/CUBIC_TCP">CUBIC</a>.
  */
 @SdkInternalApi
-public class RateLimiterTokenBucket {
+public class RateLimiterTokenBucket2 {
     private final AtomicReference<PersistentState> stateReference;
     private final RateLimiterClock clock;
     private final Object lock = new Object();
     private final AtomicBoolean spinLock = new AtomicBoolean(false);
     private volatile long nextCheckTime = 0L;
 
-    RateLimiterTokenBucket(RateLimiterClock clock) {
+    RateLimiterTokenBucket2(RateLimiterClock clock) {
         this.clock = clock;
         this.stateReference = new AtomicReference<>(new PersistentState());
     }
@@ -53,9 +55,46 @@ public class RateLimiterTokenBucket {
      * {@link RateLimiterAcquireResponse#delay()} a {@link Duration#ZERO} value, otherwise it will return the amount of time the
      * callers need to wait until enough tokens are refilled.
      */
-    public RateLimiterAcquireResponse tryAcquire() {
-        StateUpdate<Duration> update = updateState(ts -> ts.tokenBucketAcquire(clock, 1.0));
-        return RateLimiterAcquireResponse.create(update.result);
+    public AcquireResult tryAcquire() {
+        synchronized (lock) {
+            long currentTime = System.nanoTime();
+            if (nextCheckTime > currentTime) {
+                Duration nextAttempt = Duration.ofNanos(nextCheckTime - currentTime);
+                System.out.printf("acquire too early: %dms%n", nextAttempt.toMillis());
+                return new AcquireResult(null, nextAttempt, this::tryAcquire);
+            }
+            PersistentState persistentState = stateReference.get();
+            TransientState ts = persistentState.toTransient();
+            Duration duration = ts.tokenBucketAcquire(clock, 1.0);
+            stateReference.set(ts.toPersistent());
+            nextCheckTime = currentTime + duration.toNanos();
+
+            return new AcquireResult(RateLimiterAcquireResponse.create(duration), Duration.ZERO, null);
+        }
+    }
+
+    public static class AcquireResult {
+        private RateLimiterAcquireResponse response;
+        private Duration delayUntilNext = Duration.ZERO;
+        private Callable<AcquireResult> next;
+
+        public AcquireResult(RateLimiterAcquireResponse response, Duration delayUntilNext, Callable<AcquireResult> next) {
+            this.response = response;
+            this.delayUntilNext = delayUntilNext;
+            this.next = next;
+        }
+
+        public Optional<RateLimiterAcquireResponse> response() {
+            return Optional.ofNullable(response);
+        }
+
+        public Duration delayUntilNext() {
+            return delayUntilNext;
+        }
+
+        public Optional<Callable<AcquireResult>> next() {
+            return Optional.ofNullable(next);
+        }
     }
 
     /**
@@ -100,11 +139,11 @@ public class RateLimiterTokenBucket {
      */
     private <T> StateUpdate<T> updateState(Function<TransientState, T> mutator) {
 
-        while (!spinLock.compareAndSet(false, true))
-            ;
+        // while (!spinLock.compareAndSet(false, true))
+        //     ;
 
-        try {
-            // synchronized (lock) {
+        // try {
+            synchronized (lock) {
             PersistentState current;
             PersistentState updated;
             T result;
@@ -117,10 +156,10 @@ public class RateLimiterTokenBucket {
 
 
             return new StateUpdate<>(updated, result);
-            // }
-        } finally {
-            spinLock.compareAndSet(true, false);
-        }
+            }
+        // } finally {
+        //     spinLock.compareAndSet(true, false);
+        // }
     }
 
     PersistentState currentState() {
@@ -191,12 +230,13 @@ public class RateLimiterTokenBucket {
             if (this.currentCapacity < amount) {
                 waitTime = (amount - this.currentCapacity) / this.fillRate;
                 this.currentCapacity = 0.0;
-                try {
-                    Duration d = Duration.ofNanos((long) (waitTime * 1_000_000_000.0));
-                    Thread.sleep(d.toMillis());
-                } catch (InterruptedException ie) {
-                    // ignored
-                }
+                return Duration.ofNanos((long) (waitTime * 1_000_000_000.0));
+                // try {
+                //     Duration d = Duration.ofNanos((long) (waitTime * 1_000_000_000.0));
+                //     Thread.sleep(d.toMillis());
+                // } catch (InterruptedException ie) {
+                //     // ignored
+                // }
             } else {
                 this.currentCapacity -= amount;
             }

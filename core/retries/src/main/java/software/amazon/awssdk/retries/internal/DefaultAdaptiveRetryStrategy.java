@@ -23,7 +23,7 @@ import software.amazon.awssdk.retries.api.AcquireInitialTokenRequest;
 import software.amazon.awssdk.retries.api.BackoffStrategy;
 import software.amazon.awssdk.retries.api.RefreshRetryTokenRequest;
 import software.amazon.awssdk.retries.internal.circuitbreaker.TokenBucketStore;
-import software.amazon.awssdk.retries.internal.ratelimiter.RateLimiterTokenBucket;
+import software.amazon.awssdk.retries.internal.ratelimiter.RateLimiterTokenBucket2;
 import software.amazon.awssdk.retries.internal.ratelimiter.RateLimiterTokenBucketStore;
 import software.amazon.awssdk.utils.Logger;
 import software.amazon.awssdk.utils.Validate;
@@ -43,29 +43,58 @@ public final class DefaultAdaptiveRetryStrategy
 
     @Override
     protected Duration computeInitialBackoff(AcquireInitialTokenRequest request) {
-        RateLimiterTokenBucket bucket = rateLimiterTokenBucketStore.tokenBucketForScope(request.scope());
-        return bucket.tryAcquire().delay();
+        RateLimiterTokenBucket2 bucket = rateLimiterTokenBucketStore.tokenBucketForScope(request.scope());
+        while (true) {
+            RateLimiterTokenBucket2.AcquireResult acquireResult = bucket.tryAcquire();
+            if (!acquireResult.response().isPresent()) {
+                try {
+                    long spinDelayMs = acquireResult.delayUntilNext().toMillis();
+                    System.out.printf("computeInitialBackoff: spin %dms%n", spinDelayMs);
+                    Thread.sleep(spinDelayMs);
+                } catch (InterruptedException e) {
+                    // ignored
+                }
+            } else {
+                return acquireResult.response().get().delay();
+            }
+        }
     }
 
     @Override
     protected Duration computeBackoff(RefreshRetryTokenRequest request, DefaultRetryToken token) {
         Duration backoff = super.computeBackoff(request, token);
-        RateLimiterTokenBucket bucket = rateLimiterTokenBucketStore.tokenBucketForScope(token.scope());
-        return backoff.plus(bucket.tryAcquire().delay());
+        RateLimiterTokenBucket2 bucket = rateLimiterTokenBucketStore.tokenBucketForScope(token.scope());
+        Duration acquireDelay;
+        while (true) {
+            RateLimiterTokenBucket2.AcquireResult acquireResult = bucket.tryAcquire();
+            if (!acquireResult.response().isPresent()) {
+                try {
+                    long delayMs = acquireResult.delayUntilNext().toMillis();
+                    System.out.printf("computeBackoff: spin %dms%n", delayMs);
+                    Thread.sleep(delayMs);
+                } catch (InterruptedException e) {
+                    // ignored
+                }
+            } else {
+                acquireDelay = acquireResult.response().get().delay();
+                break;
+            }
+        }
+        return backoff.plus(acquireDelay);
     }
 
     @Override
     protected void updateStateForRetry(RefreshRetryTokenRequest request) {
         if (treatAsThrottling.test(request.failure())) {
             DefaultRetryToken token = asDefaultRetryToken(request.token());
-            RateLimiterTokenBucket bucket = rateLimiterTokenBucketStore.tokenBucketForScope(token.scope());
+            RateLimiterTokenBucket2 bucket = rateLimiterTokenBucketStore.tokenBucketForScope(token.scope());
             bucket.updateRateAfterThrottling();
         }
     }
 
     @Override
     protected void updateStateForSuccess(DefaultRetryToken token) {
-        RateLimiterTokenBucket bucket = rateLimiterTokenBucketStore.tokenBucketForScope(token.scope());
+        RateLimiterTokenBucket2 bucket = rateLimiterTokenBucketStore.tokenBucketForScope(token.scope());
         bucket.updateRateAfterSuccess();
     }
 
